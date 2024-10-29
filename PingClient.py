@@ -1,75 +1,83 @@
 import socket
 import time
 import random
-import argparse
 
-def ping_client(server_address, server_port):
-     
+# Configuration
+PING_COUNT = 15
+TIMEOUT = 0.6  # Timeout in seconds (600 ms)
+PORT = 12000   # Default port
+BUFFER_SIZE = 1024
+
+def ping_client(host, port):
+    # Create UDP socket
     client_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    client_socket.settimeout(0.6) 
-    sequence_number = random.randint(10000, 20000)
-   
-    rtt_list = []
-    acknowledged_packets = 0
-    total_transmission_time = 0
-    
-    
-    start_time = time.time()
+    client_socket.settimeout(TIMEOUT)
 
-    for i in range(15):
-        current_sequence = sequence_number + i
-        message = f"PING {current_sequence} {time.time()}"
+    # Initialize statistics
+    rtt_list = []
+    packets_acked = 0
+    start_time = time.time()
+    random_seq_start = random.randint(10000, 20000)
+
+    for seq in range(random_seq_start, random_seq_start + PING_COUNT):
         send_time = time.time()
+        message = f"PING {seq} {int(send_time * 1000)}\r\n"
         
         try:
-            client_socket.sendto(message.encode(), (server_address, server_port))
-            modifiedMessage, serverAddress = client_socket.recvfrom(2048)
+            # Send packet
+            client_socket.sendto(message.encode(), (host, port))
+            print(f"Sent: PING {seq} {int(send_time * 1000)}")
+
+            # Wait for a response (RTT calculation)
+            response, _ = client_socket.recvfrom(BUFFER_SIZE)
             receive_time = time.time()
 
-            rtt = (receive_time - send_time) * 1000  
+            # Calculate RTT
+            rtt = (receive_time - send_time) * 1000  # Convert to ms
             rtt_list.append(rtt)
-            acknowledged_packets += 1
+            packets_acked += 1
 
-            print(f"PING to 127.0.0.1, seq={current_sequence}, rtt={int(rtt)} ms")
+            print(f"Received: {response.decode().strip()} RTT = {rtt:.2f} ms")
 
         except socket.timeout:
-            print(f"PING to 127.0.0.1, seq={current_sequence}, rtt=timeout")
-    
-    total_transmission_time = time.time() - start_time
-    
-    client_socket.close()
-    
-    
+            # Packet lost (timeout)
+            print(f"Ping to {host}, seq={seq}, rtt=timeout")
+
+    # Calculate summary statistics
+    end_time = time.time()
+    total_transmission_time = (end_time - start_time) * 1000  # Total time in ms
+
     if rtt_list:
         min_rtt = min(rtt_list)
         max_rtt = max(rtt_list)
         avg_rtt = sum(rtt_list) / len(rtt_list)
+        jitter = sum(abs(rtt_list[i] - rtt_list[i-1]) for i in range(1, len(rtt_list))) / (len(rtt_list) - 1)
     else:
-        min_rtt = max_rtt = avg_rtt = 0
+        min_rtt = max_rtt = avg_rtt = jitter = 0
 
-    packet_loss = ((15 - acknowledged_packets) / 15) * 100
+    # Packet acknowledgment percentage
+    ack_percentage = (packets_acked / PING_COUNT) * 100
 
-    jitter = 0
-    if len(rtt_list) > 1:
-        jitter = sum(abs(rtt_list[i] - rtt_list[i-1]) 
-                     for i in range(1, len(rtt_list))) / (len(rtt_list) - 1)
+    # Display final report
+    print("\n--- Ping statistics ---")
+    print(f"Packets: Sent = {PING_COUNT}, Received = {packets_acked}, Lost = {PING_COUNT - packets_acked} "
+          f"({100 - ack_percentage:.2f}% loss)")
+    print(f"RTT: Minimum = {min_rtt:.2f} ms, Maximum = {max_rtt:.2f} ms, Average = {avg_rtt:.2f} ms")
+    print(f"Total transmission time: {total_transmission_time:.2f} ms")
+    print(f"Jitter: {jitter:.2f} ms")
+
+    # Close the socket
+    client_socket.close()
+
+if __name__ == "__main__":
+    # Example usage: python3 PingClient.py <host> <port>
+    import sys
+    if len(sys.argv) != 3:
+        print("Usage: python3 PingClient.py <host> <port>")
+        sys.exit(1)
     
+    host = sys.argv[1]
+    port = int(sys.argv[2])
 
-    print("...")
-    print(f"Total packets sent: {15}")
-    print(f"Packets acknowledged: {acknowledged_packets}")
-    print(f"Packet loss: {int(packet_loss)}%")
-    print(f"Minimum RTT: {int(min_rtt)} ms, Maximum RTT: {int(max_rtt)} ms, Average RTT: {int(avg_rtt)} ms")
-    print(f"Total transmission time: {int(total_transmission_time * 1000)} ms")
-    print(f"Jitter: {int(jitter)} ms")
+    ping_client(host, port)
 
-
-
-if __name__ == '__main__':
-    
-    parser = argparse.ArgumentParser(description="Ping")
-    parser.add_argument('host', type=str)
-    parser.add_argument('port', type=int)
-    args = parser.parse_args()
-
-    ping_client(args.host, args.port)
